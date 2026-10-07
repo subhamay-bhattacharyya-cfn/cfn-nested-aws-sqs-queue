@@ -4,31 +4,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-This is a **CloudFormation template repository** that provides reusable nested stack templates for deploying S3 buckets with security best practices. Templates follow the nested stack pattern and are designed to be referenced by parent CloudFormation stacks.
+This is a **CloudFormation template repository** that provides reusable nested stack templates for deploying SQS queues with flexible configuration for Standard and FIFO queue types. Templates follow the nested stack pattern and are designed to be referenced by parent CloudFormation stacks.
 
 **Key characteristics:**
 
 - Nested CloudFormation templates (referenced via `TemplateURL`)
-- Parameterized bucket naming with account ID, environment, and region
-- S3 security defaults: versioning enabled, public access blocked
-- Optional S3 bucket policy enforcement (encryption, secure transport)
+- Parameterized queue naming with environment and region
+- Support for both Standard and FIFO queue types
+- Configurable message retention and visibility timeout
+- Cross-account access policies for multi-account scenarios
 - Automated semantic versioning and releases
 - AWS OIDC authentication for CI/CD deployments
 
 ## Project Structure
 
 ```text
-templates/
-├── s3-bucket.yaml                # Nested template: S3 bucket creation
-└── s3-bucket-policy.yaml         # Nested template: S3 bucket policy
+cloudformation/
+└── template.yaml                  # Nested template: SQS queue creation (Standard/FIFO)
 
 parameters/
 ├── dev.json                       # Parameters for development environment
 ├── staging.json                   # Parameters for staging environment
-├── prod.json                      # Parameters for production environment
-├── policy-dev.json                # Bucket policy parameters (development)
-├── policy-staging.json            # Bucket policy parameters (staging)
-└── policy-prod.json               # Bucket policy parameters (production)
+└── prod.json                      # Parameters for production environment
 
 .github/workflows/
 ├── ci.yaml                        # Validates, deploys, and cleans up templates
@@ -48,6 +45,7 @@ scripts/plugins/
 
 package.json                       # Dependencies: semantic-release, commitizen
 README.md                          # Template documentation and usage examples
+CLAUDE.md                          # This file: Claude Code guidance
 ```
 
 ## Development Commands
@@ -82,67 +80,73 @@ This repo provides **nested stack templates** — templates that are referenced 
 - **Nested templates** output values via `Outputs` section with `Export`
 - Parent retrieves outputs via `!GetAtt NestedStack.Outputs.OutputKey`
 
-### Bucket Naming Convention
+### Queue Naming Convention
 
-Bucket names follow a deterministic pattern driven by parameters:
+Queue names follow a deterministic pattern driven by parameters:
 
+**Standard Queue:**
 ```bash
-{ProjectName}-{BucketBaseName}-{AccountId}-{Environment}-{Region}[-{CiSuffix}]
+{ProjectName}-{QueueBaseName}-{Environment}-{Region}[-{CiSuffix}]
 ```
 
-Example: `myproject-cfn-bucket-123456789012-devl-us-east-1`
+**FIFO Queue:**
+```bash
+{ProjectName}-{QueueBaseName}-{Environment}-{Region}[-{CiSuffix}].fifo
+```
+
+Examples:
+- `myapp-task-queue-devl-us-east-1` (Standard)
+- `myapp-order-queue-prod-us-east-1.fifo` (FIFO)
+- `myapp-test-queue-test-us-east-1-ci123` (Standard with CI suffix)
 
 This ensures:
 
-- Uniqueness across AWS accounts and regions
+- Uniqueness across environments and regions
 - Environment isolation
+- Clear distinction between Standard and FIFO queues
 - Consistent naming for infrastructure automation
 
 ### Parameter-Driven Configuration
 
-Both templates accept parameters to support:
+The template accepts parameters to support:
 
-- **Standalone mode**: Direct bucket name provided
-- **Integrated mode**: Bucket name constructed from project/environment parameters
-
-The `s3-bucket-policy.yaml` template checks if `BucketName` is provided; if not, it constructs the name using the same parameters as the bucket template.
+- **Queue Type Selection**: Standard or FIFO queues with automatic naming
+- **Message Configuration**: Visibility timeout, retention period, and long polling
+- **Cross-Account Access**: Optional resource policy for multi-account scenarios
+- **CI/CD Integration**: Optional suffix for ephemeral test deployments
 
 ## Key Files to Understand
 
-### `templates/s3-bucket.yaml`
+### `cloudformation/template.yaml`
 
-**Purpose:** Creates an S3 bucket with security defaults
+**Purpose:** Creates an SQS queue with flexible configuration for Standard or FIFO queue types
 
 **Key inputs:**
 
-- `ProjectName` (required): Project prefix
-- `BucketBaseName` (default: `cfn-bucket`): Base name component
-- `environment`: Environment label (devl, stag, prod)
-- `CiSuffix`: Optional suffix for CI/CD unique deployments
+- `ProjectName` (required): Project prefix (lowercase, alphanumeric, hyphens only)
+- `QueueBaseName` (default: `sqs-queue`): Base name component
+- `Environment` (default: `devl`): Environment label (devl, stag, prod)
+- `QueueType` (default: `Standard`): Queue type (Standard or FIFO)
+- `CiSuffix` (optional): Suffix for CI/CD unique deployments
+- `CrossAccountArns` (optional): Comma-delimited list of cross-account principal ARNs
 
 **Key outputs:**
 
-- `S3BucketName`: Bucket name (exported for parent stack)
-- `S3BucketArn`: Bucket ARN
+- `QueueName`: Queue name (exported for parent stack)
+- `QueueUrl`: Queue URL (exported for parent stack)
+- `QueueArn`: Queue ARN (exported for parent stack)
+- `QueueType`: Queue type indicator
 
 **Features:**
 
-- Versioning enabled by default
-- Public access blocking enabled (all 4 options)
-- Conditional naming: different bucket name with/without CI suffix
-
-### `templates/s3-bucket-policy.yaml`
-
-**Purpose:** Applies an optional S3 bucket policy for encryption and transport security
-
-**Key inputs:** Same as bucket template, plus `BucketName` (standalone mode)
-
-**Behavior:**
-
-- If `BucketName` provided (non-empty), use it directly
-- Otherwise, construct name from ProjectName/BucketBaseName/environment/CiSuffix
-- Enforces S3 encryption on PutObject
-- Enforces HTTPS-only transport
+- Support for both Standard and FIFO queue types
+- Automatic `.fifo` suffix for FIFO queues
+- Configurable message retention (60s to 14 days, default: 4 days)
+- Configurable visibility timeout (0-43200s, default: 30s)
+- Optional long polling support (0-20s wait time)
+- Content-based deduplication for FIFO queues
+- Same-account and cross-account IAM policies
+- Conditional naming: different queue name with/without CI suffix
 
 ### `.github/workflows/ci.yaml`
 
@@ -152,13 +156,13 @@ The `s3-bucket-policy.yaml` template checks if `BucketName` is provided; if not,
 - Pull requests (any branch)
 - Pushes to `feature/**` and `bug/**` branches
 
-**Path filter:** Only runs if changes to `templates/`, `parameters/`, or `.github/workflows/ci.yaml`
+**Path filter:** Only runs if changes to `cloudformation/`, `parameters/`, or `.github/workflows/ci.yaml`
 
 **Phases:**
 
-1. **Validation:** `aws cloudformation validate-template` on both templates
-2. **Deployment:** Creates CloudFormation stacks in CI environment
-3. **Cleanup:** Destroys stacks (policy stack first, then bucket) for ephemeral testing
+1. **Validation:** `aws cloudformation validate-template` on the queue template
+2. **Deployment:** Creates CloudFormation stack in CI environment with test parameters
+3. **Cleanup:** Destroys the test stack for ephemeral testing
 
 **Environment setup:**
 
@@ -190,26 +194,27 @@ The `s3-bucket-policy.yaml` template checks if `BucketName` is provided; if not,
 **Manual template validation:**
 
 ```bash
-aws cloudformation validate-template --template-body file://templates/s3-bucket.yaml
-aws cloudformation validate-template --template-body file://templates/s3-bucket-policy.yaml
+aws cloudformation validate-template --template-body file://cloudformation/template.yaml
 ```
 
 **Manual stack deployment:**
 
 ```bash
-# Deploy bucket to dev environment
+# Deploy queue to dev environment
 aws cloudformation deploy \
-  --template-file templates/s3-bucket.yaml \
-  --stack-name my-stack-dev \
+  --template-file cloudformation/template.yaml \
+  --stack-name my-sqs-queue-dev \
   --parameter-overrides file://parameters/dev.json \
   --region us-east-1
 
-# Deploy policy after bucket is created
-aws cloudformation deploy \
-  --template-file templates/s3-bucket-policy.yaml \
-  --stack-name my-policy-dev \
-  --parameter-overrides file://parameters/policy-dev.json \
-  --region us-east-1
+# Wait for stack creation
+aws cloudformation wait stack-create-complete --stack-name my-sqs-queue-dev --region us-east-1
+
+# Get queue details
+aws cloudformation describe-stacks \
+  --stack-name my-sqs-queue-dev \
+  --query 'Stacks[0].Outputs' \
+  --output table
 ```
 
 The CI workflow (ci.yaml) runs this full cycle automatically on PR, then cleans up.
@@ -244,12 +249,13 @@ Only commits to `main` trigger releases. Feature branches use this format but re
 
 ## When Modifying Templates
 
-1. **Edit the template YAML** in `templates/`
+1. **Edit the template YAML** in `cloudformation/`
 2. **Update parameter files** in `parameters/` if new parameters added
-3. **Test locally** with `aws cloudformation validate-template`
-4. **Create a PR** with conventional commit message (e.g., `feat: add encryption key parameter`)
-5. **CI validates and deploys** to dev environment automatically
-6. **Merge to main** → release workflow creates version tag and GitHub release
+3. **Test locally** with `aws cloudformation validate-template --template-body file://cloudformation/template.yaml`
+4. **Verify queue naming** matches the expected pattern: `{ProjectName}-{QueueBaseName}-{Environment}-{Region}[-{CiSuffix}][.fifo]`
+5. **Create a PR** with conventional commit message (e.g., `feat: add cross-account access support`)
+6. **CI validates and deploys** to dev environment automatically
+7. **Merge to main** → release workflow creates version tag and GitHub release
 
 ## Dev Container
 
@@ -260,7 +266,12 @@ Pre-configured with:
 
 Use via VS Code: `code --remote-container-url <repo-url>`
 
-## Current Branch
+## Current Branch & Development Workflow
 
-Main branch is the release branch. Feature work branches from here and merges back via PR. Branch naming follows: `{type}/CFN-{issue-number}-{slug}` (e.g., `feature/CFN-42-add-encryption`).
+- **Main branch** (`main`) is the release branch — auto-triggered for semantic versioning on merge
+- **Feature branches** derive from main and merge back via PR
+- **Branch naming convention:** `{type}/CFN-{issue-number}-{slug}`
+  - Examples: `feature/CFN-0001-implement-sqs-queue`, `bug/CFN-0002-fix-naming`
+- **CI runs automatically** on PR and feature/* branches to validate templates
+- **Commit format:** Use `npx cz commit` to ensure conventional commit format for semantic releases
 
