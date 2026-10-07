@@ -93,7 +93,7 @@ Resources:
       VisibilityTimeout: !Ref VisibilityTimeout
       MessageRetentionPeriod: !Ref MessageRetentionPeriod
       ReceiveMessageWaitTimeSeconds: !Ref ReceiveMessageWaitTimeSeconds
-      FifoQueue: !If [IsFifoQueue, true, false]
+      FifoQueue: !If [IsFifoQueue, true, !Ref AWS::NoValue]
       ContentBasedDeduplication: !If [EnableContentDedupForFifo, true, !Ref AWS::NoValue]
       Tags:
         - Key: Environment
