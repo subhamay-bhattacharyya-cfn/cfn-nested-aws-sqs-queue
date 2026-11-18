@@ -65,6 +65,11 @@ Parameters:
     AllowedValues: ['true', 'false']
     Description: Enable content-based deduplication (FIFO queues only)
 
+  S3BucketArn:
+    Type: String
+    Default: ''
+    Description: ARN of the S3 bucket allowed to send messages to this queue (e.g., arn:aws:s3:::my-bucket). Leave empty to omit the S3 policy statement
+
 Conditions:
   HasCiSuffix: !Not [!Equals [!Ref CiSuffix, ""]]
   IsFifoQueue: !Equals [!Ref QueueType, FIFO]
@@ -73,6 +78,7 @@ Conditions:
   EnableContentDedupForFifo: !And
     - !Condition IsFifoQueue
     - !Condition EnableContentDedup
+  HasS3SendMessage: !Not [!Equals [!Ref S3BucketArn, '']]
 
 Resources:
   SQSQueue:
@@ -130,6 +136,20 @@ Resources:
                 - sqs:SendMessage
                 - sqs:ReceiveMessage
               Resource: !GetAtt SQSQueue.Arn
+            - !Ref AWS::NoValue
+          - !If
+            - HasS3SendMessage
+            - Sid: AllowS3ToSendMessage
+              Effect: Allow
+              Principal:
+                Service: s3.amazonaws.com
+              Action: sqs:SendMessage
+              Resource: !GetAtt SQSQueue.Arn
+              Condition:
+                StringEquals:
+                  aws:SourceAccount: !Ref AWS::AccountId
+                ArnLike:
+                  aws:SourceArn: !Ref S3BucketArn
             - !Ref AWS::NoValue
 
 Outputs:
