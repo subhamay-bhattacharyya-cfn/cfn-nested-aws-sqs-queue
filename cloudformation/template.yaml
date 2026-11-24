@@ -70,6 +70,11 @@ Parameters:
     Default: ''
     Description: ARN of the S3 bucket allowed to send messages to this queue (e.g., arn:aws:s3:::my-bucket). Leave empty to omit the S3 policy statement
 
+  KmsKey:
+    Type: String
+    Default: ''
+    Description: Optional KMS key ID, ARN, or alias used to encrypt the queue (SSE-KMS). Leave empty to use SQS-managed encryption
+
 Conditions:
   HasCiSuffix: !Not [!Equals [!Ref CiSuffix, ""]]
   IsFifoQueue: !Equals [!Ref QueueType, FIFO]
@@ -79,11 +84,25 @@ Conditions:
     - !Condition IsFifoQueue
     - !Condition EnableContentDedup
   HasS3SendMessage: !Not [!Equals [!Ref S3BucketArn, '']]
+  HasKmsKey: !Not [!Equals [!Ref KmsKey, '']]
 
 Resources:
   SQSQueue:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
+    Metadata:
+      com:
+        aws:
+          cloudformation:
+            Context:
+              why: Reusable message queue for parent stacks, supporting Standard or FIFO types, optional cross-account access, and optional S3 event notifications
+              trust:
+                src: infer
+                conf: low
+                note: "rationale not documented"
+              must:
+                - FIFO queues must have a QueueName ending in .fifo, which the QueueName condition enforces
+                - S3BucketArn must be the exact ARN of the bucket that sends notifications, or S3 will be denied by the queue policy
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !If
@@ -101,6 +120,7 @@ Resources:
       ReceiveMessageWaitTimeSeconds: !Ref ReceiveMessageWaitTimeSeconds
       FifoQueue: !If [IsFifoQueue, true, !Ref AWS::NoValue]
       ContentBasedDeduplication: !If [EnableContentDedupForFifo, true, !Ref AWS::NoValue]
+      KmsMasterKeyId: !If [HasKmsKey, !Ref KmsKey, !Ref AWS::NoValue]
       Tags:
         - Key: Environment
           Value: !Ref Environment
